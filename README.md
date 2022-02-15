@@ -10,6 +10,7 @@ Implementations developed in [[1]](#1-scaling-neural-tangent-kernels-via-sketchi
 ## Examples
 ### Fully-connected NTK approximation via random features:
 ```python
+from jax import random
 from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
 
 relufeat_arg = {
@@ -25,7 +26,7 @@ init_fn, _, features_fn = serial(
 )
 
 x = random.normal(random.PRNGKey(1), (5, 4))
-_, feat_fn_inputs = init_fn(random.PRNGKey(2), (x.shape, (-1,0))
+_, feat_fn_inputs = init_fn(random.PRNGKey(2), (x.shape, (-1,0)))
 f0 = _inputs_to_features(x)
 feats = features_fn(f0, feat_fn_inputs)
 ```
