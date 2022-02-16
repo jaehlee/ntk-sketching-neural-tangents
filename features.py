@@ -4,30 +4,11 @@ from jax import numpy as np
 import jax.example_libraries.stax as ostax
 from neural_tangents.utils.typing import Callable, Tuple
 from neural_tangents.utils import utils, dataclasses
+
+from sketching import TensorSRHT2, PolyTensorSRHT
 """Implementation for NTK Sketching and Random Features
 
 """
-
-
-# TensorSRHT of degree 2. This version allows different input vectors.
-class TensorSRHT2:
-
-  def __init__(self, rng, input_dim1, input_dim2, sketch_dim):
-    assert sketch_dim % 2 == 0
-    rng1, rng2, rng3, rng4 = random.split(rng, 4)
-    self.input_dim1 = input_dim1
-    self.input_dim2 = input_dim2
-    self.sketch_dim = sketch_dim
-    self.rand_signs1 = random.choice(rng1, 2, shape=(input_dim1,)) * 2 - 1
-    self.rand_signs2 = random.choice(rng2, 2, shape=(input_dim2,)) * 2 - 1
-    self.rand_inds1 = random.choice(rng3, input_dim1, shape=(sketch_dim // 2,))
-    self.rand_inds2 = random.choice(rng4, input_dim2, shape=(sketch_dim // 2,))
-
-  def sketch(self, x1, x2):
-    x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
-    x2fft = np.fft.fftn(x2 * self.rand_signs2, axes=(-1,))[:, self.rand_inds2]
-    out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
-    return np.concatenate((out.real, out.imag), 1)
 
 
 # Arc-cosine kernel functions is for debugging.
@@ -130,6 +111,8 @@ def ReluFeatures(
     feature_dim0: int = 1,
     feature_dim1: int = 1,
     sketch_dim: int = 1,
+    poly_degree0: int = 4,
+    poly_degree1: int = 4,
     method: str = 'rf',
     debug: bool = False,
 ):
@@ -141,12 +124,15 @@ def ReluFeatures(
     new_nngp_feat_shape = nngp_feat_shape[:-1] + (feature_dim1,)
     new_ntk_feat_shape = ntk_feat_shape[:-1] + (sketch_dim,)
 
-    if not debug:
+    if not debug and method == 'rf':
       rng1, rng2, rng3 = random.split(rng, 3)
       W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
       W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
       ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
       return (new_nngp_feat_shape, new_ntk_feat_shape), (W0, W1, ts2)
+    elif not debug and method == 'pts':
+      rng1, rng2 = random.split(rng)
+      raise NotImplementedError
     else:
       return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
@@ -163,6 +149,9 @@ def ReluFeatures(
     ntk_feat = ts2.sketch(f.ntk_feat, kappa0_feat)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+
+  def polysketch_features_fn(f: Features, input, **kwargs) -> Features:
+    pass
 
   def features_fn_debug(f: Features, input=None, **kwargs) -> Features:
 
