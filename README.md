@@ -14,9 +14,10 @@ from jax import random
 from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
 
 relufeat_arg = {
-    'feature_dim0':128,
-    'feature_dim1':128,
-    'sketch_dim': 256
+    'feature_dim0': 128,
+    'feature_dim1': 128,
+    'sketch_dim': 256,
+    'method': 'rf',
 }
 
 init_fn, _, features_fn = serial(
@@ -25,8 +26,11 @@ init_fn, _, features_fn = serial(
     DenseFeatures(1)
 )
 
-x = random.normal(random.PRNGKey(1), (5, 4))
-_, feat_fn_inputs = init_fn(random.PRNGKey(2), (x.shape, (-1,0)))
-f0 = _inputs_to_features(x)
-feats = features_fn(f0, feat_fn_inputs)
+key1, key2 = random.split(random.PRNGKey(1))
+x = random.normal(key1, (5, 4))
+
+_, feat_fn_inputs = init_fn(key2, (x.shape, (-1,0)))
+feats = features_fn(_inputs_to_features(x), feat_fn_inputs)
+# feats.nngp_feat is a feature map of NNGP kernel
+# feats.ntk_feat is a feature map of NTK
 ```
