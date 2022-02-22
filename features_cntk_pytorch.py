@@ -186,12 +186,14 @@ def myrtle5_feat(x, ops):
 
     for i in range(4):
         # Conv
+        print(f"i={i} | z_nngp.shape = {z_nngp.shape} ", end='')
         z_nngp = conv2d_feat(z_nngp, filter_size) / filter_size
         if i == 0:
             z_ntk = z_nngp
         else:
             z_ntk = conv2d_feat(z_ntk, filter_size) / filter_size
             z_ntk = torch.cat((z_ntk, z_nngp), axis=-1)
+        print(f" || z_nngp.shape = {z_nngp.shape}")
 
         # ReLU
         _, P, Q, _ = z_nngp.shape
@@ -220,7 +222,7 @@ def myrtle5_feat(x, ops):
 def TEST_myrtle_network():
 
     xx = torch.randn(2, 32, 32, 3)
-    ops = CntkFeatureMapOps(num_layers=4, stride=3, C=3, m1=4, m0=3, m_cs=6)
+    ops = CntkFeatureMapOps(num_layers=4, stride=3, C=3, m1=400, m0=300, m_cs=600)
 
     z_nngp, z_ntk = myrtle5_feat(xx, ops)
 
