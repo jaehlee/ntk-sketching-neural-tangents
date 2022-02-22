@@ -15,6 +15,7 @@ class TensorSRHT2:
     self.rand_signs2 = random.choice(rng2, 2, shape=(input_dim2,)) * 2 - 1
     self.rand_inds1 = random.choice(rng3, input_dim1, shape=(sketch_dim // 2,))
     self.rand_inds2 = random.choice(rng4, input_dim2, shape=(sketch_dim // 2,))
+    self.shape = (input_dim1,input_dim2,sketch_dim)
 
   def sketch(self, x1, x2):
     x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
@@ -33,7 +34,9 @@ def tensorsrht(x1, x2, rand_inds, rand_signs):
 # TensorSRHT of degree p. This operates the same input vectors.
 class PolyTensorSRHT:
 
-  def __init__(self, rng, input_dim, sketch_dim, degree):
+  def __init__(self, rng, input_dim, sketch_dim, coeffs):
+    self.coeffs = coeffs
+    degree = len(coeffs) - 1
     self.degree = degree
 
     self.tree_rand_signs = [0 for i in range((self.degree - 1).bit_length())]
