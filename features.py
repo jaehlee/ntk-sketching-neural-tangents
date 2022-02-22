@@ -74,7 +74,6 @@ def serial(*layers):
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
   # import time
-
   def feature_fn(k, inputs, **kwargs):
     for f, input_ in zip(feature_fns, inputs):
       # print(f)

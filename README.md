@@ -8,7 +8,8 @@ Implementations developed in [[1]](#1-scaling-neural-tangent-kernels-via-sketchi
 
 
 ## Examples
-### Fully-connected NTK approximation via random features:
+### - Fully-connected NTK approximation via Random Features:
+
 ```python
 from jax import random
 from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
@@ -20,7 +21,7 @@ relufeat_arg = {
     'method': 'rf',
 }
 
-init_fn, _, features_fn = serial(
+init_fn, _, feature_fn = serial(
     DenseFeatures(512), ReluFeatures(**relufeat_arg),
     DenseFeatures(512), ReluFeatures(**relufeat_arg),
     DenseFeatures(1)
@@ -29,8 +30,28 @@ init_fn, _, features_fn = serial(
 key1, key2 = random.split(random.PRNGKey(1))
 x = random.normal(key1, (5, 4))
 
-_, feat_fn_inputs = init_fn(key2, (x.shape, (-1,0)))
-feats = features_fn(_inputs_to_features(x), feat_fn_inputs)
+initial_nngp_feat_shape = x.shape
+initial_ntk_feat_shape = (-1,0)
+initial_feat_shape = (initial_nngp_feat_shape, initial_ntk_feat_shape)
+
+_, feat_fn_inputs = init_fn(key2, initial_feat_shape)
+feats = feature_fn(_inputs_to_features(x), feat_fn_inputs)
+# feats.nngp_feat is a feature map of NNGP kernel
+# feats.ntk_feat is a feature map of NTK
+```
+
+### - Convolutional NTK approximation via Random Features:
+```python
+init_fn, _ feature_fn = serial(
+    ConvFeatures(512, filter_size=3), ReluFeatures(**relu_args),
+    AvgPoolFeatures(2, 2), FlattenFeatures()
+)
+
+n, H, W, C = 5, 8, 8, 3
+x = random.normal(key1, shape=(n, H, W, C))
+
+_, feat_fn_inputs = init_fn(key2, (x.shape, (-1, 0))
+feats = feature_fn(_inputs_to_features(x), feat_fn_inputs)
 # feats.nngp_feat is a feature map of NNGP kernel
 # feats.ntk_feat is a feature map of NTK
 ```
