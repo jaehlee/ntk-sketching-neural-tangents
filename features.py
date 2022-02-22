@@ -1,14 +1,21 @@
 from jax import random
 from jax import numpy as np
+from jax.numpy.linalg import cholesky
 
 import jax.example_libraries.stax as ostax
+from neural_tangents import stax
 from neural_tangents.utils.typing import Callable, Tuple
 from neural_tangents.utils import utils, dataclasses
 
 from sketching import TensorSRHT2, PolyTensorSRHT
-"""Implementation for NTK Sketching and Random Features
+"""Implementation for NTK Sketching and Random Features"""
 
-"""
+
+def _prod(tuple_):
+  prod = 1
+  for x in tuple_:
+    prod = prod * x
+  return prod
 
 
 # Arc-cosine kernel functions is for debugging.
@@ -38,8 +45,6 @@ class Features:
   nngp_feat: np.ndarray
   ntk_feat: np.ndarray
 
-  shape: Tuple[int, ...] = dataclasses.field(pytree_node=False)
-
   batch_axis: int = dataclasses.field(pytree_node=False)
   channel_axis: int = dataclasses.field(pytree_node=False)
 
@@ -49,7 +54,6 @@ class Features:
 def _inputs_to_features(x: np.ndarray,
                         batch_axis: int = 0,
                         channel_axis: int = -1,
-                        eps: float = 1e-12,
                         **kwargs) -> Features:
   """Transforms (batches of) inputs to a `Features`."""
 
@@ -59,7 +63,6 @@ def _inputs_to_features(x: np.ndarray,
 
   return Features(nngp_feat=nngp_feat,
                   ntk_feat=ntk_feat,
-                  shape=x.shape,
                   batch_axis=batch_axis,
                   channel_axis=channel_axis)
 
@@ -67,15 +70,20 @@ def _inputs_to_features(x: np.ndarray,
 # Modified the serial process of feature map blocks.
 # Followed https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py
 def serial(*layers):
-  init_fns, apply_fns, features_fns = zip(*layers)
+  init_fns, apply_fns, feature_fns = zip(*layers)
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
-  def features_fn(k, inputs, **kwargs):
-    for f, input_ in zip(features_fns, inputs):
+  # import time
+
+  def feature_fn(k, inputs, **kwargs):
+    for f, input_ in zip(feature_fns, inputs):
+      # print(f)
+      # tic = time.time()
       k = f(k, input_, **kwargs)
+      # print(f"toc: {time.time() - tic:.2f} sec")
     return k
 
-  return init_fn, apply_fn, features_fn
+  return init_fn, apply_fn, feature_fn
 
 
 def DenseFeatures(out_dim: int,
@@ -96,6 +104,8 @@ def DenseFeatures(out_dim: int,
 
   def kernel_fn(f: Features, input, **kwargs):
     nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
+    nngp_feat *= W_std
+    ntk_feat *= W_std
 
     if np.all(ntk_feat == 0.0):
       ntk_feat = nngp_feat
@@ -113,11 +123,14 @@ def ReluFeatures(
     sketch_dim: int = 1,
     poly_degree0: int = 4,
     poly_degree1: int = 4,
+    poly_sketch_dim0: int = 1,
+    poly_sketch_dim1: int = 1,
     method: str = 'rf',
     debug: bool = False,
 ):
 
   method = method.lower()
+  assert method in ['rf', 'pts']
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
@@ -126,50 +139,175 @@ def ReluFeatures(
 
     if not debug and method == 'rf':
       rng1, rng2, rng3 = random.split(rng, 3)
+      # Random vectors for random features of arc-cosine kernel of order 0.
       W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
+      # Random vectors for random features of arc-cosine kernel of order 1.
       W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
+      # TensorSRHT of degree 2 for approximating tensor product.
       ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
       return (new_nngp_feat_shape, new_ntk_feat_shape), (W0, W1, ts2)
+
     elif not debug and method == 'pts':
-      rng1, rng2 = random.split(rng)
-      raise NotImplementedError
+      rng1, rng2, rng3 = random.split(rng, 3)
+      # PolySketch algorithm for arc-cosine kernel of order 0.
+      pts0 = PolyTensorSRHT(rng1, nngp_feat_shape[-1], poly_sketch_dim0,
+                            poly_degree0)
+      # PolySketch algorithm for arc-cosine kernel of order 1.
+      pts1 = PolyTensorSRHT(rng2, nngp_feat_shape[-1], poly_sketch_dim1,
+                            poly_degree1)
+      # TensorSRHT of degree 2 for approximating tensor product.
+      ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
+      return (new_nngp_feat_shape, new_ntk_feat_shape), (pts0, pts1, ts2)
+
     else:
+      # This is for debug.
+      new_nngp_feat_shape = nngp_feat_shape[:-1] + (_prod(
+          nngp_feat_shape[:-1]),)
+      new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
       return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
   def apply_fn(**kwargs):
     return None
 
-  def random_features_fn(f: Features, input, **kwargs) -> Features:
+  def feature_fn(f: Features, input=None, **kwargs) -> Features:
 
-    W0: np.ndarray = input[0]
-    W1: np.ndarray = input[1]
-    ts2: TensorSRHT2 = input[2]
-    kappa0_feat = (f.nngp_feat @ W0 > 0) / np.sqrt(W0.shape[-1])
-    nngp_feat = np.maximum(f.nngp_feat @ W1, 0) / np.sqrt(W1.shape[-1])
-    ntk_feat = ts2.sketch(f.ntk_feat, kappa0_feat)
+    input_shape = f.nngp_feat.shape[:-1]
+    nngp_feat_dim = f.nngp_feat.shape[-1]
+    ntk_feat_dim = f.ntk_feat.shape[-1]
+
+    nngp_feat_2d = f.nngp_feat.reshape(-1, nngp_feat_dim)
+    ntk_feat_2d = f.ntk_feat.reshape(-1, ntk_feat_dim)
+
+    if debug:  # Exact feature extraction via Cholesky decomposition.
+      nngp_feat = cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
+
+      ntk = ntk_feat_2d @ ntk_feat_2d.T
+      kappa0_mat = kappa0(nngp_feat_2d)
+      ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
+
+    elif method == 'rf':  # Random Features approach.
+      W0: np.ndarray = input[0]
+      W1: np.ndarray = input[1]
+      ts2: TensorSRHT2 = input[2]
+
+      kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
+      nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) / np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
+      ntk_feat = ts2.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
+      
+
+    elif method == 'pts':
+      pts0: PolyTensorSRHT = input[0]
+      pts1: PolyTensorSRHT = input[1]
+      ts2: TensorSRHT2 = input[2]
+      raise NotImplementedError
+
+    else:
+      raise NotImplementedError
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  def polysketch_features_fn(f: Features, input, **kwargs) -> Features:
-    pass
+  return init_fn, apply_fn, feature_fn
 
-  def features_fn_debug(f: Features, input=None, **kwargs) -> Features:
 
-    # Exact feature maps of arc-cosine kernels.
-    n = f.nngp_feat.shape[0]
-    nngp_feat = np.linalg.cholesky(kappa1(f.nngp_feat))
-    kappa0_feat = np.linalg.cholesky(kappa0(f.nngp_feat))
+def conv_feat(X, filter_size):
+  N, H, W, C = X.shape
+  out = np.zeros((N, H, W, C * filter_size))
+  out = out.at[:, :, :, :C].set(X)
+  j = 1
+  for i in range(1, min((filter_size + 1) // 2, W)):
+    out = out.at[:, :, :-i, j * C:(j + 1) * C].set(X[:, :, i:])
+    j += 1
+    out = out.at[:, :, i:, j * C:(j + 1) * C].set(X[:, :, :-i])
+    j += 1
+  return out
 
-    # Exact tensor product without sketching.
-    ntk_feat = np.einsum('ij, ik->ijk', f.ntk_feat, kappa0_feat).reshape(n, -1)
+
+def conv2d_feat(X, filter_size):
+  return conv_feat(np.moveaxis(conv_feat(X, filter_size), 1, 2), filter_size)
+
+
+def ConvFeatures(out_dim: int,
+                 filter_size: int,
+                 W_std: float,
+                 b_std: float = 0.,
+                 channel_axis: int = -1):
+
+  def init_fn(rng, input_shape):
+    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] * filter_size**2,)
+    new_ntk_feat_shape = nngp_feat_shape[:-1] + ((nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
+    return (new_nngp_feat_shape, new_ntk_feat_shape), ()
+
+  def apply_fn(**kwargs):
+    return None
+
+  def feature_fn(f, input, **kwargs):
+    nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
+
+    nngp_feat = conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
+
+    if np.all(ntk_feat == 0.0):
+      ntk_feat = nngp_feat
+    else:
+      ntk_feat = conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
+      ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  if debug:
-    features_fn = features_fn_debug
-  elif method == 'rf':
-    features_fn = random_features_fn
-  else:
-    raise NotImplementedError
+  return init_fn, apply_fn, feature_fn
 
-  return init_fn, apply_fn, features_fn
+
+def AvgPoolFeatures(window_size: int,
+                    stride_size: int = 2,
+                    padding: str = stax.Padding.VALID.name,
+                    normalize_edges: bool = False,
+                    batch_axis: int = 0,
+                    channel_axis: int = -1):
+
+  def init_fn(rng, input_shape):
+    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+
+    new_nngp_feat_shape = nngp_feat_shape[:1] + (
+        nngp_feat_shape[1] // window_size,
+        nngp_feat_shape[2] // window_size) + nngp_feat_shape[-1:]
+    new_ntk_feat_shape = ntk_feat_shape[:1] + (
+        ntk_feat_shape[1] // window_size,
+        ntk_feat_shape[2] // window_size) + ntk_feat_shape[-1:]
+    return (new_nngp_feat_shape, new_ntk_feat_shape), ()
+
+  def apply_fn(**kwargs):
+    return None
+
+  def feature_fn(f, input=None, **kwargs):
+    window_shape_kernel = (1,) + (window_size,) * 2 + (1,)
+    strides_kernel = (1,) + (window_size,) * 2 + (1,)
+    pooling = lambda x: stax._pool_kernel(
+        x, stax.Pooling.AVG, window_shape_kernel, strides_kernel,
+        stax.Padding(padding), normalize_edges, 0)
+    nngp_feat = pooling(f.nngp_feat)
+    ntk_feat = pooling(f.ntk_feat)
+
+    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+
+  return init_fn, apply_fn, feature_fn
+
+
+def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
+
+  def init_fn(rng, input_shape):
+    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+    new_nngp_feat_shape = nngp_feat_shape[:1] + (_prod(nngp_feat_shape[1:]),)
+    new_ntk_feat_shape = ntk_feat_shape[:1] + (_prod(ntk_feat_shape[1:]),)
+    return (new_nngp_feat_shape, new_ntk_feat_shape), ()
+
+  def apply_fn(**kwargs):
+    return None
+
+  def feature_fn(f, input=None, **kwargs):
+    batch_size = f.nngp_feat.shape[0]
+    nngp_feat = f.nngp_feat.reshape(batch_size, -1)
+    ntk_feat = f.ntk_feat.reshape(batch_size, -1)
+
+    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+
+  return init_fn, apply_fn, feature_fn
