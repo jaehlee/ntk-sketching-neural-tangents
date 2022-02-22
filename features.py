@@ -191,9 +191,10 @@ def ReluFeatures(
       ts2: TensorSRHT2 = input[2]
 
       kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
-      nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) / np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
-      ntk_feat = ts2.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
-      
+      nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) /
+                   np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
+      ntk_feat = ts2.sketch(ntk_feat_2d,
+                            kappa0_feat).reshape(input_shape + (-1,))
 
     elif method == 'pts':
       pts0: PolyTensorSRHT = input[0]
@@ -228,14 +229,16 @@ def conv2d_feat(X, filter_size):
 
 def ConvFeatures(out_dim: int,
                  filter_size: int,
-                 W_std: float,
+                 W_std: float = 1.0,
                  b_std: float = 0.,
                  channel_axis: int = -1):
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] * filter_size**2,)
-    new_ntk_feat_shape = nngp_feat_shape[:-1] + ((nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
+    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] *
+                                                  filter_size**2,)
+    new_ntk_feat_shape = nngp_feat_shape[:-1] + (
+        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
   def apply_fn(**kwargs):
@@ -305,8 +308,10 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
   def feature_fn(f, input=None, **kwargs):
     batch_size = f.nngp_feat.shape[0]
-    nngp_feat = f.nngp_feat.reshape(batch_size, -1)
-    ntk_feat = f.ntk_feat.reshape(batch_size, -1)
+    nngp_feat = f.nngp_feat.reshape(batch_size, -1) / np.sqrt(
+        _prod(f.nngp_feat.shape[1:-1]))
+    ntk_feat = f.ntk_feat.reshape(batch_size, -1) / np.sqrt(
+        _prod(f.ntk_feat.shape[1:-1]))
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
