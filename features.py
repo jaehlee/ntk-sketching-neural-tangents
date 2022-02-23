@@ -4,8 +4,8 @@ from jax.numpy.linalg import cholesky
 
 import jax.example_libraries.stax as ostax
 from neural_tangents import stax
-from neural_tangents.utils.typing import Callable, Tuple
-from neural_tangents.utils import utils, dataclasses
+from neural_tangents._src.utils.typing import Callable, Tuple
+from neural_tangents._src.utils import utils, dataclasses
 
 from sketching import TensorSRHT2, PolyTensorSRHT
 """Implementation for NTK Sketching and Random Features"""
